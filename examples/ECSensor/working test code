@@ -1,0 +1,45 @@
+#include <ECSensor.h>
+
+ECSensor ec;
+
+// calibrationConstant = rawCal * knownEC = 164 * 2700
+const float calibrationConstant = 442800.0;  // µS·cycles
+const float CF_COEF             =   10.0;   // ppm per mS/cm
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+
+  ec.begin();
+  ec.setOversampling(4);  // average 16 discharge measurements
+
+  Serial.println();
+  Serial.println("=== EC & CF Reader (fixed division) ===");
+  Serial.print("calibrationConstant = ");
+  Serial.println(calibrationConstant, 1);
+  Serial.print("CF coefficient      = ");
+  Serial.println(CF_COEF, 1);
+  Serial.println();
+}
+
+void loop() {
+  uint16_t raw = ec.readSensor();  // averaged cycles
+
+  // division to get conductivity
+  float ec_uS = calibrationConstant / raw;  // µS/cm
+  float ec_mS = ec_uS / 1000.0;             // mS/cm
+
+  // compute CF
+  float cf    = ec_mS * CF_COEF;            // ppm
+
+  Serial.print("Raw: ");
+  Serial.print(raw);
+  Serial.print("  | EC: ");
+  Serial.print(ec_mS, 3);
+  Serial.print(" mS/cm");
+  Serial.print("  | CF: ");
+  Serial.print(cf,   1);
+  Serial.println(" ppm");
+
+  delay(1000);
+}
