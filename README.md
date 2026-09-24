@@ -34,3 +34,92 @@ Galvanic *isolation* and *ground effects* are another issue. When the project is
 
 ![EC_probe](https://user-images.githubusercontent.com/2418004/127962574-c5a07c26-dac3-4be6-9efb-2cf672eff1cc.png)
 This code and component choice is based on standard 1/4" EC/TDS probes, as commonly used in desalination or water filtering appliances. These probes can be found cheaply on many e-commerce platforms such as eBay, Amazon, Taobao, Aliexpress, etc. Most come with a standard JST-XH type conmector.
+
+
+## Version 2 / ESP32 support
+
+Version 2 keeps the original `ECSensor` implementation for legacy AVR and ESP8266 projects and adds a separate `ECSensorV2` API for the ESP32 family.
+
+Supported by the V2 implementation:
+
+- ESP32
+- ESP32-S2 / ESP32-S3
+- ESP32-C3 / ESP32-C5 / ESP32-C6
+- ESP32-H2
+- ESP32-P4
+
+The V2 implementation uses the ESP32 CPU cycle counter and a GPIO falling-edge interrupt to measure the capacitor discharge time. This keeps the original measurement principle while avoiding assumptions about a single ESP32 CPU architecture.
+
+### ESP32 example
+
+```cpp
+#include <ECSensorV2.h>
+
+ECSensorV2 ec;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Example GPIOs only: CapPos, CapNeg, EC.
+  ec.begin(4, 5, 6);
+  ec.setOversampling(5);
+}
+
+void loop() {
+  uint32_t raw = ec.readRaw();
+  Serial.printf("raw=%lu status=%s\n",
+                (unsigned long)raw,
+                ec.getStatusText());
+  delay(2000);
+}
+```
+
+Use GPIOs appropriate for your board and avoid strapping/boot pins where possible. `CapPos` must be usable as a GPIO interrupt input.
+
+### Calibration
+
+V2 deliberately does not pretend that raw discharge cycles are already an absolute EC value. Calibrate the actual probe, capacitor, resistors and PCB using a known EC standard.
+
+For example, with a 1.413 mS/cm calibration solution:
+
+```cpp
+if (ec.calibrate(1.413f)) {
+  float calibration = ec.getCalibrationConstant();
+}
+```
+
+Store the returned calibration constant in non-volatile storage such as ESP32 Preferences/NVS, then restore it at boot using `setCalibrationConstant()`.
+
+After calibration:
+
+```cpp
+float ecRaw = ec.readEC();          // mS/cm at current temperature
+float ec25  = ec.readEC(tempC);     // compensated to 25 C
+float ppm   = ec.readTDS(tempC, 500.0f);
+```
+
+The default temperature coefficient is 2%/C and can be changed with `setTemperatureCoefficient()`.
+
+### Important measurement notes
+
+The original circuit is still intentionally simple: two 330 ohm resistors and a film capacitor. A polypropylene capacitor with a low temperature coefficient remains preferable.
+
+Ground coupling can materially affect conductivity measurements. Battery operation, careful grounding and calibration in the final assembled hardware are strongly recommended.
+
+The original approximate 0.01-5 mS/cm range should be treated as a starting point, not a guaranteed calibrated range on every ESP32 board. Input thresholds, GPIO characteristics, probe geometry and component tolerances all affect the result.
+
+### Backward compatibility
+
+Existing projects can continue to use:
+
+```cpp
+#include <ECSensor.h>
+ECSensor sensor;
+```
+
+New ESP32 projects should use:
+
+```cpp
+#include <ECSensorV2.h>
+ECSensorV2 sensor;
+```
