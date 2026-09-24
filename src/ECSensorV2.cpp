@@ -43,7 +43,7 @@ bool ECSensorV2::begin(uint8_t capPosPin, uint8_t capNegPin, uint8_t ecPin) {
 }
 
 void ECSensorV2::setOversampling(uint8_t rate) {
-  oversamplingRate_ = min(rate, MAX_OVERSAMPLING);
+  oversamplingRate_ = (rate > MAX_OVERSAMPLING) ? MAX_OVERSAMPLING : rate;
 }
 
 uint8_t ECSensorV2::getOversampling() const {
@@ -52,8 +52,8 @@ uint8_t ECSensorV2::getOversampling() const {
 
 uint32_t ECSensorV2::cyclesPerMicrosecond() const {
 #if defined(ARDUINO_ARCH_ESP32)
-  uint32_t mhz = getCpuFrequencyMhz();
-  return mhz == 0 ? 1 : mhz;
+  const uint32_t mhz = getCpuFrequencyMhz();
+  return (mhz == 0) ? 1 : mhz;
 #else
   return 1;
 #endif
@@ -81,7 +81,7 @@ uint32_t ECSensorV2::singleMeasurement() {
   pinMode(capNegPin_, OUTPUT);
   delayMicroseconds(CHARGE_DELAY_US);
 
-  // Stage 2: discharge through the EC probe and measure the falling edge.
+  // Stage 2: discharge through the EC probe and capture the falling edge.
   edgeCycle_ = 0;
   pinMode(capPosPin_, INPUT);
   attachInterruptArg(capPosPin_, &ECSensorV2::onFallingEdge, this, FALLING);
@@ -93,13 +93,12 @@ uint32_t ECSensorV2::singleMeasurement() {
   pinMode(ecPin_, OUTPUT);
 
   while (edgeCycle_ == 0) {
-    if ((uint32_t)(micros() - startUs) >= EC_TIMEOUT_US) {
+    if (static_cast<uint32_t>(micros() - startUs) >= EC_TIMEOUT_US) {
       detachInterrupt(capPosPin_);
       disconnectPins();
       status_ = Status::Timeout;
       return 0;
     }
-    yield();
   }
 
   detachInterrupt(capPosPin_);
@@ -128,8 +127,10 @@ uint32_t ECSensorV2::singleMeasurement() {
   pinMode(capPosPin_, INPUT);
   pinMode(ecPin_, OUTPUT);
 
-  const uint32_t compensateUs =
-      max<uint32_t>(1, dischargeCycles / cyclesPerMicrosecond());
+  uint32_t compensateUs = dischargeCycles / cyclesPerMicrosecond();
+  if (compensateUs == 0) {
+    compensateUs = 1;
+  }
   delayMicroseconds(compensateUs);
 
   // Stage 6: return the capacitor to a neutral state.
@@ -150,7 +151,7 @@ uint32_t ECSensorV2::readRaw() {
     return 0;
   }
 
-  const uint16_t samples = (uint16_t)1U << oversamplingRate_;
+  const uint16_t samples = static_cast<uint16_t>(1U << oversamplingRate_);
   uint64_t total = 0;
 
   for (uint16_t i = 0; i < samples; ++i) {
@@ -185,7 +186,7 @@ bool ECSensorV2::calibrate(float referenceECmScm) {
 }
 
 void ECSensorV2::setCalibrationConstant(float value) {
-  calibrationConstant_ = max(0.0f, value);
+  calibrationConstant_ = (value < 0.0f) ? 0.0f : value;
 }
 
 float ECSensorV2::getCalibrationConstant() const {
@@ -222,8 +223,7 @@ float ECSensorV2::readTDS(float tdsFactor) {
   if (isnan(ec)) {
     return NAN;
   }
-  // ec is mS/cm; 1 mS/cm = 1000 uS/cm.
-  // tdsFactor is conventionally 500, 640 or 700 ppm per mS/cm.
+  // ec is in mS/cm. Typical TDS factors are 500, 640 or 700 ppm per mS/cm.
   return ec * tdsFactor;
 }
 
